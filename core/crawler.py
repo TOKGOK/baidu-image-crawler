@@ -158,12 +158,15 @@ class BaiduImageCrawler:
     
     def _download_single(self, url: str, save_path: Path, task_url: str):
         """
-        下载单张图片
+        下载单张图片（带统计信息）
         
         Args:
             url: 图片 URL
             save_path: 保存路径
             task_url: 任务 URL（用于状态更新）
+        
+        Returns:
+            下载结果
         """
         try:
             # 更新状态为下载中
@@ -172,21 +175,26 @@ class BaiduImageCrawler:
                 status='downloading'
             )
             
-            # 下载
-            success = self.downloader.download_with_retry(url, save_path)
+            # 下载（获取统计信息）
+            success, stats = self.downloader.download_with_retry(url, save_path)
             
             # 更新状态
             if success:
                 self.state_manager.update_task(
                     task_url,
-                    status='completed'
+                    status='completed',
+                    downloaded_size=stats.get('end_size', 0),
+                    error_message=''
                 )
+                logger.debug(f"下载成功：{save_path.name} ({stats.get('speed', 0):.1f} KB/s)")
             else:
+                errors = stats.get('errors', ['未知错误'])
                 self.state_manager.update_task(
                     task_url,
                     status='failed',
-                    error_message='下载失败'
+                    error_message='; '.join(errors[-3:])  # 记录最后 3 个错误
                 )
+                logger.debug(f"下载失败：{save_path.name} ({stats.get('attempts', 0)}次尝试)")
             
             return success
             
