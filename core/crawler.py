@@ -46,7 +46,7 @@ class BaiduImageCrawler:
         max_num: int = 100
     ) -> List[Dict]:
         """
-        搜索图片（多策略搜索 + 降级策略 + 明确提示）
+        搜索图片（简化 URL + 多策略 + 降级策略）
         
         Args:
             keyword: 搜索关键词
@@ -62,30 +62,28 @@ class BaiduImageCrawler:
             logger.warning("⚠️ 未配置百度 Cookie，可能无法获取真实图片")
             logger.warning("💡 提示：在 .env 文件中配置 BAIDU_COOKIE 可提高搜索成功率")
         
-        # 策略 1: 尝试百度 API（多次尝试不同参数）
+        # 策略 1: 简化 URL（使用 word 参数）
         api_configs = [
-            # 配置 1: 简化参数
+            # 配置 1: 最简 URL（推荐）
             {
-                "url": f"https://image.baidu.com/search/acgraph?word={quote(keyword)}&pn=0&rn={max_num}&tn=resultjson_com&ie=utf-8",
-                "headers": {"Referer": "https://image.baidu.com/"}
-            },
-            # 配置 2: 添加更多参数模拟真实请求
-            {
-                "url": f"https://image.baidu.com/search/index?tn=baiduimage&word={quote(keyword)}&pn=0&rn={max_num}",
+                "url": f"https://image.baidu.com/search/index?word={quote(keyword)}",
                 "headers": {
                     "Referer": "https://image.baidu.com/",
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 }
             },
-            # 配置 3: 使用完整浏览器请求头
+            # 配置 2: 添加 pn/rn 参数控制数量
             {
-                "url": f"https://image.baidu.com/search/flip?tn=baiduimage&ie=utf-8&word={quote(keyword)}&pn=0&rn={max_num}",
+                "url": f"https://image.baidu.com/search/index?word={quote(keyword)}&pn=0&rn={max_num}&tn=baiduimage",
                 "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                    "Referer": "https://image.baidu.com/"
+                    "Referer": "https://image.baidu.com/",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 }
+            },
+            # 配置 3: acgraph JSON 格式
+            {
+                "url": f"https://image.baidu.com/search/acgraph?word={quote(keyword)}&pn=0&rn={max_num}&tn=resultjson_com&ie=utf-8",
+                "headers": {"Referer": "https://image.baidu.com/"}
             }
         ]
         
