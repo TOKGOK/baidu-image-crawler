@@ -46,7 +46,7 @@ class BaiduImageCrawler:
         max_num: int = 100
     ) -> List[Dict]:
         """
-        搜索图片（多策略搜索 + 降级策略）
+        搜索图片（多策略搜索 + 降级策略 + 明确提示）
         
         Args:
             keyword: 搜索关键词
@@ -56,6 +56,11 @@ class BaiduImageCrawler:
             图片信息列表
         """
         logger.info(f"开始搜索：{keyword} (目标：{max_num}张)")
+        
+        # 检查是否配置了 Cookie
+        if not settings.baidu_cookie:
+            logger.warning("⚠️ 未配置百度 Cookie，可能无法获取真实图片")
+            logger.warning("💡 提示：在 .env 文件中配置 BAIDU_COOKIE 可提高搜索成功率")
         
         # 策略 1: 尝试百度 API（多次尝试不同参数）
         api_configs = [
@@ -71,12 +76,22 @@ class BaiduImageCrawler:
                     "Referer": "https://image.baidu.com/",
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 }
+            },
+            # 配置 3: 使用完整浏览器请求头
+            {
+                "url": f"https://image.baidu.com/search/flip?tn=baiduimage&ie=utf-8&word={quote(keyword)}&pn=0&rn={max_num}",
+                "headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Referer": "https://image.baidu.com/"
+                }
             }
         ]
         
         for i, config in enumerate(api_configs, 1):
             try:
-                logger.debug(f"尝试搜索策略 {i}/{len(api_configs)}: {config['url'][:80]}...")
+                logger.debug(f"尝试搜索策略 {i}/{len(api_configs)}")
                 
                 response = self.session.get(
                     config["url"],
@@ -88,15 +103,22 @@ class BaiduImageCrawler:
                 # 检查响应内容类型
                 content_type = response.headers.get('Content-Type', '')
                 if 'text/html' in content_type:
-                    logger.debug(f"策略 {i}: 返回 HTML，尝试下一个策略")
-                    continue
+                    # 检查是否是错误页面
+                    if '页面不存在' in response.text or 'STATUS OK' not in response.text:
+                        logger.debug(f"策略 {i}: 返回错误页面")
+                        continue
+                    logger.debug(f"策略 {i}: 返回 HTML，尝试解析")
                 
                 # 解析 JSON（清理可能的 JSONP 包装）
                 text = response.text.strip()
                 if text.startswith('callback('):
                     text = text[9:-1]
                 
-                data = json.loads(text)
+                try:
+                    data = json.loads(text)
+                except json.JSONDecodeError:
+                    logger.debug(f"策略 {i}: JSON 解析失败")
+                    continue
                 
                 # 提取图片信息
                 images = []
@@ -111,7 +133,7 @@ class BaiduImageCrawler:
                             })
                 
                 if len(images) > 0:
-                    logger.info(f"搜索成功：找到 {len(images)} 张 {keyword} 图片")
+                    logger.info(f"✅ 搜索成功：找到 {len(images)} 张 {keyword} 图片")
                     return images
                 else:
                     logger.debug(f"策略 {i}: 未找到图片")
@@ -121,7 +143,15 @@ class BaiduImageCrawler:
                 continue
         
         # 所有策略都失败，降级到占位图片
-        logger.warning(f"⚠️ 百度 API 不可用（尝试{len(api_configs)}种策略），使用占位图片代替")
+        logger.warning(f"⚠️ 百度 API 不可用（尝试{len(api_configs)}种策略）")
+        logger.warning(f"📝 可能原因:")
+        logger.warning(f"   1. 未配置百度 Cookie（推荐配置）")
+        logger.warning(f"   2. 百度反爬虫机制触发")
+        logger.warning(f"   3. 网络连接问题")
+        logger.warning(f"📝 解决方案:")
+        logger.warning(f"   1. 在 .env 文件中配置 BAIDU_COOKIE")
+        logger.warning(f"   2. 稍后重试")
+        logger.warning(f"   3. 当前使用 {max_num} 张占位图片代替")
         return self._get_test_images(keyword, max_num)
     
     def _get_test_images(self, keyword: str, max_num: int) -> List[Dict]:
