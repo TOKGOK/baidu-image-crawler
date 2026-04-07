@@ -45,7 +45,7 @@ class BaiduImageCrawler:
         max_num: int = 100
     ) -> List[Dict]:
         """
-        搜索图片（优化版：使用更可靠的 API + 降级策略）
+        搜索图片（多策略搜索 + 降级策略）
         
         Args:
             keyword: 搜索关键词
@@ -56,81 +56,95 @@ class BaiduImageCrawler:
         """
         logger.info(f"开始搜索：{keyword} (目标：{max_num}张)")
         
-        try:
-            # 使用简化的 API 参数，减少被反爬的概率
-            url = (
-                "https://image.baidu.com/search/acgraph"
-                f"?word={quote(keyword)}"
-                f"&pn=0&rn={max_num}"
-                f"&tn=resultjson_com&ie=utf-8&oe=utf-8"
-            )
-            
-            logger.debug(f"搜索 URL: {url}")
-            
-            response = self.session.get(
-                url, 
-                timeout=settings.timeout,
-                headers={'Referer': 'https://image.baidu.com/'}
-            )
-            response.raise_for_status()
-            
-            # 检查响应内容类型
-            content_type = response.headers.get('Content-Type', '')
-            if 'text/html' in content_type:
-                logger.warning(f"返回 HTML 而非 JSON，可能是反爬虫机制触发")
-                return self._get_test_images(keyword, max_num)
-            
-            # 解析 JSON（清理可能的 JSONP 包装）
-            text = response.text.strip()
-            if text.startswith('callback('):
-                text = text[9:-1]
-            
-            data = json.loads(text)
-            
-            # 提取图片信息
-            images = []
-            if 'data' in data:
-                for item in data['data']:
-                    if isinstance(item, dict) and 'objURL' in item:
-                        images.append({
-                            'url': item['objURL'],
-                            'keyword': keyword,
-                            'title': item.get('fromPageTitleEnc', '')
-                        })
-            
-            logger.info(f"搜索完成：找到 {len(images)} 张图片")
-            
-            # 如果没有找到图片，降级到测试图片源
-            if len(images) == 0:
-                logger.warning("未找到真实图片，使用测试图片验证功能")
-                return self._get_test_images(keyword, max_num)
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"JSON 解析失败：{e}，降级到测试图片源")
-            return self._get_test_images(keyword, max_num)
-        except Exception as e:
-            logger.error(f"搜索失败：{e}，降级到测试图片源")
-            return self._get_test_images(keyword, max_num)
+        # 策略 1: 尝试百度 API（多次尝试不同参数）
+        api_configs = [
+            # 配置 1: 简化参数
+            {
+                "url": f"https://image.baidu.com/search/acgraph?word={quote(keyword)}&pn=0&rn={max_num}&tn=resultjson_com&ie=utf-8",
+                "headers": {"Referer": "https://image.baidu.com/"}
+            },
+            # 配置 2: 添加更多参数模拟真实请求
+            {
+                "url": f"https://image.baidu.com/search/index?tn=baiduimage&word={quote(keyword)}&pn=0&rn={max_num}",
+                "headers": {
+                    "Referer": "https://image.baidu.com/",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            }
+        ]
         
-        return images
+        for i, config in enumerate(api_configs, 1):
+            try:
+                logger.debug(f"尝试搜索策略 {i}/{len(api_configs)}: {config['url'][:80]}...")
+                
+                response = self.session.get(
+                    config["url"],
+                    timeout=settings.timeout,
+                    headers=config["headers"]
+                )
+                response.raise_for_status()
+                
+                # 检查响应内容类型
+                content_type = response.headers.get('Content-Type', '')
+                if 'text/html' in content_type:
+                    logger.debug(f"策略 {i}: 返回 HTML，尝试下一个策略")
+                    continue
+                
+                # 解析 JSON（清理可能的 JSONP 包装）
+                text = response.text.strip()
+                if text.startswith('callback('):
+                    text = text[9:-1]
+                
+                data = json.loads(text)
+                
+                # 提取图片信息
+                images = []
+                if 'data' in data:
+                    for item in data['data']:
+                        if isinstance(item, dict) and 'objURL' in item:
+                            images.append({
+                                'url': item['objURL'],
+                                'keyword': keyword,
+                                'title': item.get('fromPageTitleEnc', ''),
+                                'is_placeholder': False
+                            })
+                
+                if len(images) > 0:
+                    logger.info(f"搜索成功：找到 {len(images)} 张 {keyword} 图片")
+                    return images
+                else:
+                    logger.debug(f"策略 {i}: 未找到图片")
+                    
+            except Exception as e:
+                logger.debug(f"策略 {i} 失败：{e}")
+                continue
+        
+        # 所有策略都失败，降级到占位图片
+        logger.warning(f"⚠️ 百度 API 不可用（尝试{len(api_configs)}种策略），使用占位图片代替")
+        return self._get_test_images(keyword, max_num)
     
     def _get_test_images(self, keyword: str, max_num: int) -> List[Dict]:
         """
         生成测试图片 URL（降级策略，用于功能验证）
         
-        使用 Picsum 可靠的测试图片服务
+        注意：这只是临时降级方案，真实使用需要百度 API
         """
-        logger.info(f"使用测试图片进行功能验证（关键词：{keyword}）")
+        logger.warning(f"⚠️ 百度 API 不可用，使用 {max_num} 张占位图片（非真实 {keyword} 图片）")
+        logger.warning(f"提示：请检查网络连接或稍后重试，当前使用随机图片代替")
         
         images = []
-        for i in range(min(max_num, 10)):  # 限制 10 张测试图片
+        for i in range(max_num):
+            # 使用 Lorem Picsum 的随机图片，带关键词种子以保证一致性
+            seed = f"{keyword}_{i}_{int(time.time() / 60)}"  # 每分钟更新一次
             images.append({
-                'url': f'https://picsum.photos/800/600?random={i}',
+                'url': f'https://picsum.photos/seed/{seed}/800/600',
                 'keyword': keyword,
-                'title': f'{keyword}_test_{i}'
+                'title': f'{keyword}_placeholder_{i+1:03d}',
+                'is_placeholder': True,
+                'note': '百度 API 不可用，此为占位图片'
             })
         
-        logger.info(f"生成 {len(images)} 张测试图片")
+        logger.info(f"生成 {len(images)} 张占位图片（关键词：{keyword}）")
         return images
     
     def download_images(
