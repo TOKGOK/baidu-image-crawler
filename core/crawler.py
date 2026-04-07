@@ -46,7 +46,7 @@ class BaiduImageCrawler:
         max_num: int = 100
     ) -> List[Dict]:
         """
-        搜索图片（明确提示 + 降级策略）
+        搜索图片（网页爬虫方案）
         
         Args:
             keyword: 搜索关键词
@@ -57,15 +57,61 @@ class BaiduImageCrawler:
         """
         logger.info(f"开始搜索：{keyword} (目标：{max_num}张)")
         
-        # 百度公开 API 已失效，直接降级到替代方案
-        logger.warning(f"⚠️ 百度图片公开 API 已失效")
-        logger.warning(f"📝 原因：百度已关闭 /search/index 和 /search/acgraph 等公开 API")
-        logger.warning(f"📝 当前使用 Picsum 占位图片代替")
-        logger.warning(f"💡 替代方案:")
-        logger.warning(f"   1. 使用网页爬虫（Playwright/Selenium）")
-        logger.warning(f"   2. 使用其他图片源 API")
-        logger.warning(f"   3. 手动下载图片到本地")
+        # 使用网页爬虫方案
+        try:
+            # 构建搜索 URL
+            url = f"https://image.baidu.com/search/index?tn=baiduimage&ie=utf-8&word={quote(keyword)}"
+            
+            logger.info(f"访问百度图片：{url[:80]}...")
+            
+            # 设置请求头
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://image.baidu.com/',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+            
+            # 添加 Cookie（如果配置了）
+            if settings.baidu_cookie:
+                headers['Cookie'] = settings.baidu_cookie
+            
+            # 发送请求
+            response = self.session.get(url, headers=headers, timeout=settings.timeout)
+            response.raise_for_status()
+            
+            # 使用正则表达式提取图片 URL
+            html = response.text
+            
+            # 匹配 img 标签中的 src 属性
+            img_pattern = r'"objURL":"(https?://[^"]+\.jpg[^"]*)"'
+            matches = re.findall(img_pattern, html)
+            
+            if matches:
+                logger.info(f"✅ 从页面提取到 {len(matches)} 张图片 URL")
+                
+                # 去重并限制数量
+                seen = set()
+                images = []
+                for img_url in matches:
+                    if img_url not in seen and len(images) < max_num:
+                        seen.add(img_url)
+                        images.append({
+                            'url': img_url.replace('\\/', '/'),
+                            'keyword': keyword,
+                            'title': f'{keyword}_{len(images)+1}',
+                            'is_placeholder': False
+                        })
+                
+                if images:
+                    logger.info(f"✅ 搜索成功：找到 {len(images)} 张 {keyword} 图片")
+                    return images
+            
+            logger.warning(f"⚠️ 未从页面提取到图片，使用备用方案")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 网页爬虫失败：{e}，使用备用方案")
         
+        # 备用方案：占位图片
         return self._get_test_images(keyword, max_num)
     
     def _get_test_images(self, keyword: str, max_num: int) -> List[Dict]:
