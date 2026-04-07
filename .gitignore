@@ -39,6 +39,12 @@ secret.*
 cookies.txt
 cookies.json
 
+# 项目管理文件（仅本地使用）
+PROJECT.md
+STRUCTURE.md
+TASKS.md
+SECURITY_RULES.md
+
 # 项目运行文件
 logs/
 *.log
