@@ -16,6 +16,7 @@
 - ✅ **错误重试** - 自动重试失败任务
 - ✅ **进度显示** - 实时显示下载进度
 - ✅ **安全配置** - 环境变量管理敏感信息
+- ✅ **安全审计** - 提交前自动检测敏感信息
 
 ---
 
@@ -68,6 +69,10 @@ python main.py "猫咪" 100
 ```
 baidu-image-crawler/
 ├── main.py                    # 主程序入口
+├── README.md                  # 项目说明
+├── requirements.txt           # Python 依赖
+├── .env.example               # 环境变量示例
+├── .gitignore                 # Git 忽略规则
 ├── config/
 │   └── settings.py            # 配置管理
 ├── core/
@@ -78,10 +83,10 @@ baidu-image-crawler/
 │   ├── logger.py              # 持久化日志
 │   └── state_manager.py       # 状态管理器
 ├── utils/
-│   └── security.py            # 安全工具（开发中）
-├── logs/                      # 日志目录
-├── downloads/                 # 下载目录
-└── .state/                    # 状态文件目录
+│   └── security.py            # 安全审计工具
+├── logs/                      # 日志目录（.gitignore）
+├── downloads/                 # 下载目录（.gitignore）
+└── .state/                    # 状态文件目录（.gitignore）
 ```
 
 ---
@@ -95,15 +100,28 @@ baidu-image-crawler/
 - ✅ `.env` 文件已在 `.gitignore` 中排除
 - ✅ 提交前自动执行安全审计
 
-### 安全审计
+### 安全审计工具
 
 ```bash
+# 运行安全审计
+python utils/security.py .
+
 # 检查敏感信息
 grep -r "BAIDUID\|BDUSS\|password" . --include="*.py"
 
 # 运行静态分析
 python -m bandit -r .
 ```
+
+### 检测类型
+
+| 类型 | 检测模式 | 风险等级 |
+|------|---------|---------|
+| Cookie | BAIDUID/BDUSS/STOKEN | 🔴 Critical |
+| Token | ghp_*/gho_*/ghu_* | 🔴 Critical |
+| 私钥 | BEGIN PRIVATE KEY | 🔴 Critical |
+| 密码 | password/passwd/pwd | 🟡 High |
+| API Key | api_key/apikey | 🟡 High |
 
 ---
 
@@ -140,6 +158,13 @@ tail -f logs/crawler.log
 grep "ERROR" logs/crawler.log
 ```
 
+### 查看下载统计
+
+```bash
+# 查看 .state/download_state.json
+cat .state/download_state.json | jq '.tasks | length'
+```
+
 ---
 
 ## 🛠️ 开发
@@ -155,6 +180,16 @@ pytest tests/
 ```bash
 black .
 flake8 .
+```
+
+### 提交前检查
+
+```bash
+# 安全审计
+python utils/security.py .
+
+# 确保无敏感信息
+git diff --cached | grep -i "password\|secret\|token"
 ```
 
 ---
