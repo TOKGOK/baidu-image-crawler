@@ -2,21 +2,24 @@
 持久化日志模块
 
 支持日志轮转、并发安全、持久化存储
+Python 3.11+ 特性：使用 Self 类型、改进的类型注解
 """
 
-import logging
-from pathlib import Path
-from loguru import logger
-from concurrent_log_handler import ConcurrentRotatingFileHandler
+from __future__ import annotations
+
 import sys
+from pathlib import Path
+from typing import Self
+
+from loguru import logger
 
 
 class PersistentLogger:
-    """持久化日志类"""
+    """持久化日志类（Python 3.11+ 优化版）"""
     
-    def __init__(self, log_path: Path, log_level: str = "INFO"):
-        self.log_path = log_path
-        self.log_level = log_level
+    def __init__(self, log_path: Path, log_level: str = "INFO") -> None:
+        self.log_path: Path = log_path
+        self.log_level: str = log_level
         
         # 配置 loguru
         logger.remove()  # 移除默认处理器
@@ -42,16 +45,21 @@ class PersistentLogger:
             diagnose=True  # 显示变量值
         )
     
-    def get_logger(self, name: str = "crawler"):
+    def get_logger(self, name: str = "crawler") -> logger:
         """获取日志记录器"""
         return logger.bind(name=name)
+    
+    @classmethod
+    def create(cls, log_path: Path, log_level: str = "INFO") -> Self:
+        """工厂方法：创建日志实例（Python 3.11+ Self 类型）"""
+        return cls(log_path, log_level)
 
 
 # 全局日志实例（延迟初始化）
-_logger_instance = None
+_logger_instance: PersistentLogger | None = None
 
 
-def get_logger(name: str = "crawler"):
+def get_logger(name: str = "crawler") -> logger:
     """获取全局日志实例"""
     global _logger_instance
     if _logger_instance is None:

@@ -2,12 +2,15 @@
 安全工具模块
 
 提供敏感信息检测、脱敏、审计等功能
+Python 3.11+ 特性：使用 Self 类型、改进的类型注解、tomllib
 """
 
-import re
+from __future__ import annotations
+
 import os
+import re
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import Self
 
 from storage.logger import get_logger
 
@@ -15,7 +18,7 @@ logger = get_logger("security")
 
 
 # 敏感信息检测规则
-SENSITIVE_PATTERNS = {
+SENSITIVE_PATTERNS: dict[str, re.Pattern[str]] = {
     'cookie': re.compile(r'(BAIDUID|BDUSS|STOKEN|BSST)=[\w%]+', re.IGNORECASE),
     'token': re.compile(r'(ghp_|gho_|ghu_|ghs_|ghr_)[a-zA-Z0-9]{36,}', re.IGNORECASE),
     'api_key': re.compile(r'(api_key|apikey|API_KEY)=[\'"]?[\w-]{20,}[\'"]?', re.IGNORECASE),
@@ -27,13 +30,18 @@ SENSITIVE_PATTERNS = {
 
 
 class SecurityAuditor:
-    """安全审计类"""
+    """安全审计类（Python 3.11+ 优化版）"""
     
-    def __init__(self, project_root: Path):
-        self.project_root = project_root
-        self.issues: List[Dict] = []
+    def __init__(self, project_root: Path) -> None:
+        self.project_root: Path = project_root
+        self.issues: list[dict[str, str | int]] = []
     
-    def scan_file(self, file_path: Path) -> List[Dict]:
+    @classmethod
+    def create(cls, project_root: Path) -> Self:
+        """工厂方法：创建安全审计实例（Python 3.11+ Self 类型）"""
+        return cls(project_root)
+    
+    def scan_file(self, file_path: Path) -> list[dict[str, str | int]]:
         """
         扫描单个文件
         
@@ -79,7 +87,7 @@ class SecurityAuditor:
         
         return issues
     
-    def scan_directory(self, exclude_dirs: List[str] = None) -> List[Dict]:
+    def scan_directory(self, exclude_dirs: list[str] | None = None) -> list[dict[str, str | int]]:
         """
         扫描整个目录
         

@@ -8,19 +8,23 @@
 示例:
     python main.py "风景" 50
     python main.py "猫咪" 100
+
+Python 3.11+ 特性：更友好的错误回溯
 """
 
-import sys
-import argparse
+from __future__ import annotations
 
-from storage.logger import get_logger
-from core.crawler import BaiduImageCrawler
+import argparse
+import sys
+
 from config.settings import settings
+from core.crawler import BaiduImageCrawler
+from storage.logger import get_logger
 
 logger = get_logger("main")
 
 
-def main():
+def main() -> None:
     """主函数"""
     # 解析命令行参数
     parser = argparse.ArgumentParser(

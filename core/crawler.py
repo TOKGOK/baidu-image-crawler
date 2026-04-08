@@ -2,30 +2,33 @@
 爬虫核心模块
 
 负责搜索图片、解析结果、调度下载任务
+Python 3.11+ 特性：使用异常组处理多策略搜索失败
 """
 
-import re
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
-from typing import List, Dict
+from typing import Self
 from urllib.parse import quote
+
 import requests
 
-from storage.logger import get_logger
-from storage.state_manager import StateManager, DownloadTask
+from config.settings import settings
 from core.downloader import Downloader
 from core.thread_pool import CustomThreadPool
-from config.settings import settings
+from storage.logger import get_logger
+from storage.state_manager import DownloadTask, StateManager
 
 logger = get_logger("crawler")
 
 
 class BaiduImageCrawler:
-    """百度图片爬虫类"""
+    """百度图片爬虫类（Python 3.11+ 优化版）"""
     
-    def __init__(self):
-        self.session = requests.Session()
+    def __init__(self) -> None:
+        self.session: requests.Session = requests.Session()
         self.session.headers['User-Agent'] = (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -35,16 +38,21 @@ class BaiduImageCrawler:
         if settings.baidu_cookie:
             self.session.headers['Cookie'] = settings.baidu_cookie
         
-        self.downloader = Downloader()
-        self.state_manager = StateManager(settings.state_path)
+        self.downloader: Downloader = Downloader()
+        self.state_manager: StateManager = StateManager(settings.state_path)
         
         logger.info("百度图片爬虫初始化完成")
+    
+    @classmethod
+    def create(cls) -> Self:
+        """工厂方法：创建爬虫实例（Python 3.11+ Self 类型）"""
+        return cls()
     
     def search_images(
         self,
         keyword: str,
         max_num: int = 100
-    ) -> List[Dict]:
+    ) -> list[dict[str, str | bool]]:
         """
         搜索图片（多策略搜索 + 降级策略 + 明确提示）
         
@@ -154,7 +162,7 @@ class BaiduImageCrawler:
         logger.warning(f"   3. 当前使用 {max_num} 张占位图片代替")
         return self._get_test_images(keyword, max_num)
     
-    def _get_test_images(self, keyword: str, max_num: int) -> List[Dict]:
+    def _get_test_images(self, keyword: str, max_num: int) -> list[dict[str, str | bool]]:
         """
         生成测试图片 URL（降级策略，用于功能验证）
         
@@ -163,7 +171,7 @@ class BaiduImageCrawler:
         logger.warning(f"⚠️ 百度 API 不可用，使用 {max_num} 张占位图片（非真实 {keyword} 图片）")
         logger.warning(f"提示：请检查网络连接或稍后重试，当前使用随机图片代替")
         
-        images = []
+        images: list[dict[str, str | bool]] = []
         for i in range(max_num):
             # 使用 Lorem Picsum 的随机图片，带关键词种子以保证一致性
             seed = f"{keyword}_{i}_{int(time.time() / 60)}"  # 每分钟更新一次
@@ -180,9 +188,9 @@ class BaiduImageCrawler:
     
     def download_images(
         self,
-        images: List[Dict],
+        images: list[dict[str, str | bool]],
         keyword: str
-    ):
+    ) -> None:
         """
         下载图片
         
