@@ -10,7 +10,6 @@ Python 3.11+ 特性：现代化类型注解
 
 from __future__ import annotations
 
-import asyncio
 import os
 import platform
 import subprocess
@@ -23,19 +22,35 @@ from typing import Any
 
 import streamlit as st
 
-# 添加项目根目录到路径
-sys.path.insert(0, str(Path(__file__).parent))
-
+from config.constants import (
+    MAX_LOG_ENTRIES,
+    GUI_REFRESH_INTERVAL_RUNNING,
+    GUI_REFRESH_INTERVAL_IDLE,
+    GUI_KEYWORD_MAX_LENGTH,
+    GUI_KEYWORD_MIN_LENGTH,
+    GUI_DOWNLOAD_MIN_COUNT,
+    GUI_DOWNLOAD_MAX_COUNT,
+    GUI_PREVIEW_PAGE_SIZE,
+    GUI_PREVIEW_COLUMNS,
+    GUI_HISTORY_DISPLAY_COUNT,
+    IMAGE_EXTENSIONS,
+)
 from config.settings import settings
 from core.crawler import BaiduImageCrawler
-from core.downloader import Downloader
 from storage.state_manager import StateManager
+from storage.logger import get_logger
+from utils.validator import validate_keyword, validate_download_count, ValidationError
+
+# 初始化日志
+logger = get_logger("gui")
 
 # 全局状态（线程安全）
 class ThreadSafeState:
     """线程安全的状态管理"""
-    def __init__(self):
+
+    def __init__(self, max_logs: int = MAX_LOG_ENTRIES):
         self._lock = threading.Lock()
+        self._max_logs = max_logs
         self._state = {
             'is_running': False,
             'stop_flag': False,
@@ -44,29 +59,29 @@ class ThreadSafeState:
             'download_history': [],
             'current_keyword': '',
         }
-    
+
     def get(self, key: str, default=None):
         with self._lock:
             return self._state.get(key, default)
-    
+
     def set(self, key: str, value: Any):
         with self._lock:
             self._state[key] = value
-    
+
     def update_stats(self, stats: dict):
         with self._lock:
             self._state['stats'] = stats
-    
+
     def add_log(self, log_entry: str):
         with self._lock:
             self._state['logs'].append(log_entry)
-            if len(self._state['logs']) > 100:
-                self._state['logs'] = self._state['logs'][-100:]
-    
+            if len(self._state['logs']) > self._max_logs:
+                self._state['logs'] = self._state['logs'][-self._max_logs:]
+
     def add_history(self, history: dict):
         with self._lock:
             self._state['download_history'].append(history)
-    
+
     def get_all(self) -> dict:
         with self._lock:
             return self._state.copy()
@@ -222,10 +237,10 @@ def apply_custom_css() -> None:
 def open_directory(path: Path) -> bool:
     """
     跨平台打开目录
-    
+
     Args:
         path: 要打开的目录路径
-        
+
     Returns:
         bool: 是否成功打开
     """
@@ -234,10 +249,14 @@ def open_directory(path: Path) -> bool:
             os.startfile(path)
         elif platform.system() == "Darwin":  # macOS
             subprocess.run(["open", str(path)], check=False)
-        else:  # Linux 和其他系统
+        else:  # Linux和其他系统
             subprocess.run(["xdg-open", str(path)], check=False)
         return True
-    except Exception:
+    except OSError as e:
+        logger.warning(f"打开目录失败: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"打开目录异常: {e}")
         return False
 
 
@@ -581,61 +600,67 @@ def render_image_preview(config: dict[str, Any]) -> None:
     
     if selected_dir:
         image_dir = download_path / selected_dir
-        image_files = list(image_dir.glob("*.jpg")) + list(image_dir.glob("*.png")) + list(image_dir.glob("*.gif"))
-        
+        # 使用常量定义的图片扩展名
+        image_files = []
+        for ext in IMAGE_EXTENSIONS:
+            image_files.extend(image_dir.glob(f"*{ext}"))
+
         if image_files:
-            st.caption(f"共 {len(image_files)} 张图片")
-            
+            st.caption(f"共{len(image_files)}张图片")
+
             # 分页显示
-            page_size = 12
+            page_size = GUI_PREVIEW_PAGE_SIZE
             total_pages = (len(image_files) + page_size - 1) // page_size
             page = st.number_input("页码", min_value=1, max_value=total_pages, value=1)
-            
+
             start_idx = (page - 1) * page_size
             end_idx = min(start_idx + page_size, len(image_files))
-            
+
             # 显示图片网格
-            cols = st.columns(4)
+            cols = st.columns(GUI_PREVIEW_COLUMNS)
             for i, img_path in enumerate(image_files[start_idx:end_idx]):
-                with cols[i % 4]:
+                with cols[i % GUI_PREVIEW_COLUMNS]:
                     try:
                         st.image(str(img_path), use_container_width=True)
                         st.caption(img_path.name[:20] + "..." if len(img_path.name) > 20 else img_path.name)
-                    except Exception:
+                    except OSError:
                         st.warning("无法加载图片")
+                    except Exception as e:
+                        st.warning(f"加载失败: {e}")
 
 
 def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_placeholder) -> None:
     """在后台线程运行爬虫（使用线程安全状态）"""
+    crawler = None
     try:
         add_log(f"开始爬取任务: 关键词='{keyword}', 数量={max_num}", "INFO")
-        
-        # 使用局部配置变量，避免修改全局 settings
+
+        # 使用局部配置变量，避免修改全局settings
         local_download_path = Path(config['download_path'])
         local_download_path.mkdir(parents=True, exist_ok=True)
-        
-        # 如果配置了 Cookie，临时设置（仅用于本次任务）
+
+        # 如果配置了Cookie，临时设置（仅用于本次任务）
         original_cookie = settings.baidu_cookie
         if config['baidu_cookie']:
             settings.baidu_cookie = config['baidu_cookie']
-        
+
         # 创建爬虫实例
         crawler = BaiduImageCrawler()
-        
+
         # 搜索图片
         add_log(f"正在搜索图片: {keyword}", "INFO")
         images = crawler.search_images(keyword, max_num)
-        
-        # 恢复原始 Cookie 设置
+
+        # 恢复原始Cookie设置
         settings.baidu_cookie = original_cookie
-        
+
         if not images:
             add_log("未找到任何图片", "WARNING")
             thread_safe_state.set('is_running', False)
             return
-        
-        add_log(f"找到 {len(images)} 张图片", "INFO")
-        
+
+        add_log(f"找到{len(images)}张图片", "INFO")
+
         # 更新统计（线程安全）
         stats = {
             'total': len(images),
@@ -644,42 +669,42 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
             'pending': len(images)
         }
         thread_safe_state.update_stats(stats)
-        
+
         # 创建保存目录（使用局部配置）
         save_dir = local_download_path / keyword
         save_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 下载图片
         add_log(f"开始下载图片到: {save_dir}", "INFO")
-        
+
         start_time = time.time()
         completed = 0
         failed = 0
-        
+
         for idx, img in enumerate(images):
             # 检查停止标志（线程安全）
             if thread_safe_state.get('stop_flag', False):
                 add_log("用户中断下载", "WARNING")
                 break
-            
+
             try:
                 file_name = f"{keyword}_{idx:04d}.jpg"
                 save_path = save_dir / file_name
-                
+
                 # 下载单张图片
-                success, stats = crawler.downloader.download_with_retry(
+                success, download_stats = crawler.downloader.download_with_retry(
                     img['url'],
                     save_path,
                     max_retries=config['max_retries']
                 )
-                
+
                 if success:
                     completed += 1
                     add_log(f"✅ 下载成功: {file_name}", "INFO")
                 else:
                     failed += 1
                     add_log(f"❌ 下载失败: {file_name}", "ERROR")
-                
+
                 # 更新统计（线程安全）
                 stats = {
                     'total': len(images),
@@ -688,11 +713,14 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
                     'pending': len(images) - completed - failed
                 }
                 thread_safe_state.update_stats(stats)
-                
+
+            except OSError as e:
+                failed += 1
+                add_log(f"❌ 文件操作失败: {str(e)}", "ERROR")
             except Exception as e:
                 failed += 1
                 add_log(f"❌ 下载异常: {str(e)}", "ERROR")
-        
+
         # 记录历史（线程安全）
         end_time = time.time()
         history = {
@@ -704,12 +732,18 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
             'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         thread_safe_state.add_history(history)
-        
+
         add_log(f"爬取任务完成: 成功={completed}, 失败={failed}", "INFO")
-        
+
+    except KeyboardInterrupt:
+        add_log("用户中断爬取任务", "WARNING")
+    except OSError as e:
+        add_log(f"文件系统错误: {str(e)}", "ERROR")
     except Exception as e:
         add_log(f"爬取任务异常: {str(e)}", "ERROR")
     finally:
+        if crawler:
+            crawler.close()
         thread_safe_state.set('is_running', False)
         thread_safe_state.set('stop_flag', False)
 
@@ -758,32 +792,34 @@ def main() -> None:
             st.warning("⚠️ 已有任务在运行中，请等待完成")
         else:
             # 验证输入
-            if len(keyword) < 1 or len(keyword) > 50:
-                st.error("❌ 关键词长度应在1-50个字符之间")
-            elif max_num < 1 or max_num > 1000:
-                st.error("❌ 下载数量应在1-1000之间")
-            else:
-                # 开始任务（只设置线程安全状态，sync_state_from_queue 会同步）
+            try:
+                validated_keyword = validate_keyword(keyword)
+                validated_count = validate_download_count(max_num)
+
+                # 开始任务（只设置线程安全状态，sync_state_from_queue会同步）
                 thread_safe_state.set('is_running', True)
                 thread_safe_state.set('stop_flag', False)
-                thread_safe_state.set('current_keyword', keyword)
+                thread_safe_state.set('current_keyword', validated_keyword)
                 thread_safe_state.update_stats({
-                    'total': max_num,
+                    'total': validated_count,
                     'completed': 0,
                     'failed': 0,
-                    'pending': max_num
+                    'pending': validated_count
                 })
-                
-                st.toast(f"🚀 开始下载 '{keyword}' 的图片...", icon="✅")
-                
+
+                st.toast(f"🚀 开始下载 '{validated_keyword}' 的图片...", icon="✅")
+
                 # 在后台线程运行爬虫
                 progress_placeholder = st.empty()
                 thread = threading.Thread(
                     target=run_crawler,
-                    args=(keyword, max_num, config, progress_placeholder)
+                    args=(validated_keyword, validated_count, config, progress_placeholder)
                 )
                 thread.daemon = True
                 thread.start()
+
+            except ValidationError as e:
+                st.error(f"❌ {e}")
     
     # 停止按钮
     if st.session_state.is_running:
@@ -793,26 +829,24 @@ def main() -> None:
             st.toast("正在停止下载...", icon="⚠️")
     
     # 自动刷新机制
-    # 1. 任务运行时：快速刷新（0.5秒）
-    # 2. 任务刚完成：延迟刷新以显示最终日志
-    # 3. 自动刷新开启时：定期刷新（2秒）
-    
+    # 使用Streamlit的状态管理，避免阻塞主线程
     # 初始化上次日志数量
     if 'last_log_count' not in st.session_state:
         st.session_state.last_log_count = 0
-    
+
     current_log_count = len(st.session_state.logs)
-    
+
     if st.session_state.is_running:
-        # 任务运行时快速刷新
-        time.sleep(0.5)
+        # 任务运行时使用较短的刷新间隔
         st.session_state.last_log_count = current_log_count
+        # 使用 st.empty() 的自动刷新机制，不阻塞
+        time.sleep(GUI_REFRESH_INTERVAL_RUNNING)
         st.rerun()
     elif st.session_state.auto_refresh and current_log_count > 0:
         # 任务完成后，如果日志有变化则刷新
         if current_log_count != st.session_state.last_log_count:
             st.session_state.last_log_count = current_log_count
-            time.sleep(1.0)  # 稍慢的刷新频率
+            time.sleep(GUI_REFRESH_INTERVAL_IDLE)
             st.rerun()
     
     # 日志面板

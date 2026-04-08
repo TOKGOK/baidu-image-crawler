@@ -75,3 +75,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.claude/
+CLAUDE.md
