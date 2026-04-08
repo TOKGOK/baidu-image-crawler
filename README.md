@@ -1,6 +1,6 @@
 # 百度图库图片爬虫
 
-🤖 一个可靠、高效的百度图片下载工具
+🤖 一个可靠、高效的百度图片下载工具（基于 Python 网络爬虫技术）
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,33 +9,60 @@
 
 ## ✨ 功能特性
 
+- ✅ **网页爬虫技术** - 使用 requests + BeautifulSoup 实现，无需依赖百度 API
+- ✅ **智能解析** - 多策略提取图片 URL，支持 HTML 标签和 JavaScript 数据解析
 - ✅ **断点续传** - 中断后可恢复下载
 - ✅ **多线程并发** - 自定义线程数，优化下载效率
 - ✅ **持久化日志** - 日志轮转，保留 7 天
 - ✅ **状态记忆** - JSON 持久化，重启后保留状态
-- ✅ **错误重试** - 自动重试失败任务
+- ✅ **错误重试** - 自动重试失败任务，指数退避策略
 - ✅ **进度显示** - 实时显示下载进度
 - ✅ **安全配置** - 环境变量管理敏感信息
 - ✅ **安全审计** - 提交前自动检测敏感信息
+- ✅ **图形界面** - 基于 Streamlit 的现代化 GUI
+- ✅ **反爬虫应对** - 完整的浏览器请求头模拟，请求频率控制
 
 ---
 
 ## 🚀 快速开始
 
-### 1. 安装依赖
+### 方式一：图形界面 (推荐)
+
+#### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+#### 2. 运行 GUI
+
+```bash
+streamlit run gui.py
+```
+
+#### 3. 使用界面
+
+- 在浏览器中打开 `http://localhost:8501`
+- 输入搜索关键词和下载数量
+- 点击"开始下载"按钮
+- 实时查看下载进度和日志
+
+### 方式二：命令行
+
+#### 1. 安装依赖
+
+```bash
+pip install -r requirements.txt
+```
+
+#### 2. 配置环境变量
 
 ```bash
 cp .env.example .env
 # 编辑 .env 文件，根据需要修改配置
 ```
 
-### 3. 运行爬虫
+#### 3. 运行爬虫
 
 ```bash
 # 下载 50 张风景图片
@@ -59,6 +86,8 @@ python main.py "猫咪" 100
 | `MAX_RETRIES` | 最大重试次数 | `3` |
 | `RETRY_DELAY` | 重试间隔 (秒) | `1.0` |
 | `TIMEOUT` | 请求超时 (秒) | `30` |
+| `CRAWL_DELAY` | 爬虫请求间隔 (秒) | `1.5` |
+| `MAX_PAGES` | 最大爬取页数 | `10` |
 | `LOG_LEVEL` | 日志级别 | `INFO` |
 | `BAIDU_COOKIE` | 百度 Cookie (可选) | - |
 
@@ -68,7 +97,8 @@ python main.py "猫咪" 100
 
 ```
 baidu-image-crawler/
-├── main.py                    # 主程序入口
+├── main.py                    # 命令行主程序入口
+├── gui.py                     # 图形界面主程序 (Streamlit)
 ├── README.md                  # 项目说明
 ├── requirements.txt           # Python 依赖
 ├── .env.example               # 环境变量示例
@@ -87,6 +117,45 @@ baidu-image-crawler/
 ├── logs/                      # 日志目录（.gitignore）
 ├── downloads/                 # 下载目录（.gitignore）
 └── .state/                    # 状态文件目录（.gitignore）
+```
+
+---
+
+## 🖥️ GUI 界面说明
+
+### 功能特点
+
+- **现代化设计** - 基于 Streamlit 的响应式界面
+- **实时进度** - 动态显示下载进度和统计信息
+- **配置灵活** - 侧边栏可调整所有参数
+- **日志查看** - 实时日志面板，支持过滤和导出
+- **图片预览** - 下载完成后可预览图片
+- **历史记录** - 保存下载历史便于查看
+
+### 界面布局
+
+| 区域 | 功能 |
+|------|------|
+| 顶部标题 | 项目名称和简介 |
+| 搜索表单 | 关键词输入、数量设置、开始按钮 |
+| 状态卡片 | 总任务、已完成、失败、等待中统计 |
+| 进度条 | 实时下载进度百分比 |
+| 日志面板 | 运行日志，支持级别过滤 |
+| 下载历史 | 历史任务记录 |
+| 图片预览 | 已下载图片网格展示 |
+| 侧边栏 | 配置设置、系统信息、快捷操作 |
+
+### 运行方式
+
+```bash
+# 启动 GUI
+streamlit run gui.py
+
+# 指定端口
+streamlit run gui.py --server.port 8502
+
+# 自动打开浏览器
+streamlit run gui.py --server.headless false
 ```
 
 ---

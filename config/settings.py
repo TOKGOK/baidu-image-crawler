@@ -38,6 +38,10 @@ class Settings:
         self.retry_delay: float = float(os.getenv("RETRY_DELAY", "1.0"))
         self.timeout: int = int(os.getenv("TIMEOUT", "30"))
         
+        # 爬虫配置
+        self.crawl_delay: float = float(os.getenv("CRAWL_DELAY", "1.5"))  # 爬虫请求间隔（秒）
+        self.max_pages: int = int(os.getenv("MAX_PAGES", "10"))  # 最大爬取页数
+        
         # 日志配置
         self.log_path: Path = Path(os.getenv("LOG_PATH", str(self.project_root / "logs")))
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
