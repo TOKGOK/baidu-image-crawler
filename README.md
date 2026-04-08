@@ -1,6 +1,6 @@
 # 百度图库图片爬虫
 
-🤖 一个可靠、高效的百度图片下载工具
+🤖 一个可靠、高效的百度图片下载工具（基于 Python 网络爬虫技术）
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,15 +9,18 @@
 
 ## ✨ 功能特性
 
+- ✅ **网页爬虫技术** - 使用 requests + BeautifulSoup 实现，无需依赖百度 API
+- ✅ **智能解析** - 多策略提取图片 URL，支持 HTML 标签和 JavaScript 数据解析
 - ✅ **断点续传** - 中断后可恢复下载
 - ✅ **多线程并发** - 自定义线程数，优化下载效率
 - ✅ **持久化日志** - 日志轮转，保留 7 天
 - ✅ **状态记忆** - JSON 持久化，重启后保留状态
-- ✅ **错误重试** - 自动重试失败任务
+- ✅ **错误重试** - 自动重试失败任务，指数退避策略
 - ✅ **进度显示** - 实时显示下载进度
 - ✅ **安全配置** - 环境变量管理敏感信息
 - ✅ **安全审计** - 提交前自动检测敏感信息
 - ✅ **图形界面** - 基于 Streamlit 的现代化 GUI
+- ✅ **反爬虫应对** - 完整的浏览器请求头模拟，请求频率控制
 
 ---
 
@@ -83,6 +86,8 @@ python main.py "猫咪" 100
 | `MAX_RETRIES` | 最大重试次数 | `3` |
 | `RETRY_DELAY` | 重试间隔 (秒) | `1.0` |
 | `TIMEOUT` | 请求超时 (秒) | `30` |
+| `CRAWL_DELAY` | 爬虫请求间隔 (秒) | `1.5` |
+| `MAX_PAGES` | 最大爬取页数 | `10` |
 | `LOG_LEVEL` | 日志级别 | `INFO` |
 | `BAIDU_COOKIE` | 百度 Cookie (可选) | - |
 

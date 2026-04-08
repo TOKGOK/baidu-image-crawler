@@ -31,6 +31,49 @@ from core.crawler import BaiduImageCrawler
 from core.downloader import Downloader
 from storage.state_manager import StateManager
 
+# 全局状态（线程安全）
+class ThreadSafeState:
+    """线程安全的状态管理"""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._state = {
+            'is_running': False,
+            'stop_flag': False,
+            'stats': {'total': 0, 'completed': 0, 'failed': 0, 'pending': 0},
+            'logs': [],
+            'download_history': [],
+            'current_keyword': '',
+        }
+    
+    def get(self, key: str, default=None):
+        with self._lock:
+            return self._state.get(key, default)
+    
+    def set(self, key: str, value: Any):
+        with self._lock:
+            self._state[key] = value
+    
+    def update_stats(self, stats: dict):
+        with self._lock:
+            self._state['stats'] = stats
+    
+    def add_log(self, log_entry: str):
+        with self._lock:
+            self._state['logs'].append(log_entry)
+            if len(self._state['logs']) > 100:
+                self._state['logs'] = self._state['logs'][-100:]
+    
+    def add_history(self, history: dict):
+        with self._lock:
+            self._state['download_history'].append(history)
+    
+    def get_all(self) -> dict:
+        with self._lock:
+            return self._state.copy()
+
+# 全局线程安全状态实例
+thread_safe_state = ThreadSafeState()
+
 # 页面配置
 st.set_page_config(
     page_title="百度图片爬虫",
@@ -224,13 +267,11 @@ def init_session_state() -> None:
 
 
 def add_log(message: str, level: str = "INFO") -> None:
-    """添加日志消息"""
+    """添加日志消息（线程安全）"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     log_entry = f"[{timestamp}] [{level}] {message}"
-    st.session_state.logs.append(log_entry)
-    # 保留最近100条日志
-    if len(st.session_state.logs) > 100:
-        st.session_state.logs = st.session_state.logs[-100:]
+    # 使用线程安全状态
+    thread_safe_state.add_log(log_entry)
 
 
 def render_sidebar() -> dict[str, Any]:
@@ -553,7 +594,7 @@ def render_image_preview(config: dict[str, Any]) -> None:
 
 
 def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_placeholder) -> None:
-    """在后台线程运行爬虫"""
+    """在后台线程运行爬虫（使用线程安全状态）"""
     try:
         add_log(f"开始爬取任务: 关键词='{keyword}', 数量={max_num}", "INFO")
         
@@ -568,7 +609,6 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
         
         # 创建爬虫实例
         crawler = BaiduImageCrawler()
-        st.session_state.crawler = crawler
         
         # 搜索图片
         add_log(f"正在搜索图片: {keyword}", "INFO")
@@ -579,18 +619,19 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
         
         if not images:
             add_log("未找到任何图片", "WARNING")
-            st.session_state.is_running = False
+            thread_safe_state.set('is_running', False)
             return
         
         add_log(f"找到 {len(images)} 张图片", "INFO")
         
-        # 更新统计
-        st.session_state.stats = {
+        # 更新统计（线程安全）
+        stats = {
             'total': len(images),
             'completed': 0,
             'failed': 0,
             'pending': len(images)
         }
+        thread_safe_state.update_stats(stats)
         
         # 创建保存目录（使用局部配置）
         save_dir = local_download_path / keyword
@@ -604,7 +645,8 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
         failed = 0
         
         for idx, img in enumerate(images):
-            if st.session_state.stop_flag:
+            # 检查停止标志（线程安全）
+            if thread_safe_state.get('stop_flag', False):
                 add_log("用户中断下载", "WARNING")
                 break
             
@@ -626,36 +668,49 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
                     failed += 1
                     add_log(f"❌ 下载失败: {file_name}", "ERROR")
                 
-                # 更新统计
-                st.session_state.stats = {
+                # 更新统计（线程安全）
+                stats = {
                     'total': len(images),
                     'completed': completed,
                     'failed': failed,
                     'pending': len(images) - completed - failed
                 }
+                thread_safe_state.update_stats(stats)
                 
             except Exception as e:
                 failed += 1
                 add_log(f"❌ 下载异常: {str(e)}", "ERROR")
         
-        # 记录历史
+        # 记录历史（线程安全）
         end_time = time.time()
-        st.session_state.download_history.append({
+        history = {
             'keyword': keyword,
             'total': len(images),
             'completed': completed,
             'failed': failed,
             'duration': end_time - start_time,
             'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        }
+        thread_safe_state.add_history(history)
         
         add_log(f"爬取任务完成: 成功={completed}, 失败={failed}", "INFO")
         
     except Exception as e:
         add_log(f"爬取任务异常: {str(e)}", "ERROR")
     finally:
-        st.session_state.is_running = False
-        st.session_state.stop_flag = False
+        thread_safe_state.set('is_running', False)
+        thread_safe_state.set('stop_flag', False)
+
+
+def sync_state_from_queue() -> None:
+    """从线程安全状态同步到 session_state"""
+    # 直接从线程安全状态获取所有数据
+    safe_state = thread_safe_state.get_all()
+    st.session_state.logs = safe_state['logs']
+    st.session_state.stats = safe_state['stats']
+    st.session_state.download_history = safe_state['download_history']
+    st.session_state.is_running = safe_state['is_running']
+    st.session_state.stop_flag = safe_state['stop_flag']
 
 
 def main() -> None:
@@ -663,6 +718,9 @@ def main() -> None:
     # 初始化
     apply_custom_css()
     init_session_state()
+    
+    # 同步状态（从后台线程）
+    sync_state_from_queue()
     
     # 渲染侧边栏
     config = render_sidebar()
@@ -693,16 +751,16 @@ def main() -> None:
             elif max_num < 1 or max_num > 1000:
                 st.error("❌ 下载数量应在1-1000之间")
             else:
-                # 开始任务
-                st.session_state.is_running = True
-                st.session_state.current_keyword = keyword
-                st.session_state.stop_flag = False
-                st.session_state.stats = {
+                # 开始任务（只设置线程安全状态，sync_state_from_queue 会同步）
+                thread_safe_state.set('is_running', True)
+                thread_safe_state.set('stop_flag', False)
+                thread_safe_state.set('current_keyword', keyword)
+                thread_safe_state.update_stats({
                     'total': max_num,
                     'completed': 0,
                     'failed': 0,
                     'pending': max_num
-                }
+                })
                 
                 st.toast(f"🚀 开始下载 '{keyword}' 的图片...", icon="✅")
                 
@@ -718,7 +776,8 @@ def main() -> None:
     # 停止按钮
     if st.session_state.is_running:
         if st.button("⏹️ 停止下载", type="secondary", use_container_width=True):
-            st.session_state.stop_flag = True
+            # 只设置线程安全状态
+            thread_safe_state.set('stop_flag', True)
             st.toast("正在停止下载...", icon="⚠️")
     
     # 自动刷新（运行时）

@@ -2,6 +2,10 @@
 requests>=2.31.0
 aiohttp>=3.9.0
 
+# HTML 解析（网页爬虫）
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
 # 配置管理
 python-dotenv>=1.0.0
 
