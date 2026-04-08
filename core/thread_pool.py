@@ -2,24 +2,27 @@
 自定义线程池模块
 
 支持任务队列、并发控制、进度统计
+Python 3.11+ 特性：使用 Self 类型、改进的异常处理
 """
 
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, List, Any, Optional
-from dataclasses import dataclass
-from datetime import datetime
-import time
+from __future__ import annotations
 
-from storage.logger import get_logger
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Callable, Self
+
 from config.settings import settings
+from storage.logger import get_logger
 
 logger = get_logger("thread_pool")
 
 
 @dataclass
 class TaskResult:
-    """任务结果数据类"""
+    """任务结果数据类（Python 3.11+ dataclass 优化）"""
     task_id: str
     success: bool
     result: Any = None
@@ -30,22 +33,27 @@ class TaskResult:
 
 
 class CustomThreadPool:
-    """自定义线程池类"""
+    """自定义线程池类（Python 3.11+ 优化版）"""
     
-    def __init__(self, max_workers: Optional[int] = None):
-        self.max_workers = max_workers or settings.max_threads
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self.futures = []
-        self.results: List[TaskResult] = []
-        self.lock = threading.Lock()
+    def __init__(self, max_workers: int | None = None) -> None:
+        self.max_workers: int = max_workers or settings.max_threads
+        self.executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=self.max_workers)
+        self.futures: list[Any] = []
+        self.results: list[TaskResult] = []
+        self.lock: threading.Lock = threading.Lock()
         
         # 统计信息
-        self.total_tasks = 0
-        self.completed_tasks = 0
-        self.failed_tasks = 0
-        self.start_time = None
+        self.total_tasks: int = 0
+        self.completed_tasks: int = 0
+        self.failed_tasks: int = 0
+        self.start_time: datetime | None = None
         
         logger.info(f"线程池初始化完成（最大并发：{self.max_workers}）")
+    
+    @classmethod
+    def create(cls, max_workers: int | None = None) -> Self:
+        """工厂方法：创建线程池实例（Python 3.11+ Self 类型）"""
+        return cls(max_workers)
     
     def submit(
         self,
@@ -106,7 +114,7 @@ class CustomThreadPool:
         
         logger.debug(f"任务提交 {task_id} (队列：{self.total_tasks})")
     
-    def wait(self, show_progress: bool = True) -> List[TaskResult]:
+    def wait(self, show_progress: bool = True) -> list[TaskResult]:
         """
         等待所有任务完成
         

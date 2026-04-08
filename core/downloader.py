@@ -2,27 +2,31 @@
 下载器模块
 
 支持断点续传、进度显示、错误重试、速度统计
+Python 3.11+ 特性：使用精确异常类型处理
 """
 
-import requests
-from pathlib import Path
-from typing import Optional, Tuple
-import time
-import random
-from datetime import datetime
+from __future__ import annotations
 
-from storage.logger import get_logger
+import random
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Self
+
+import requests
+
 from config.settings import settings
+from storage.logger import get_logger
 
 logger = get_logger("downloader")
 
 
 class Downloader:
-    """文件下载器类（优化版）"""
+    """文件下载器类（Python 3.11+ 优化版）"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         # 使用连接池复用 Session
-        self.session = requests.Session()
+        self.session: requests.Session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=10,
             pool_maxsize=10,
@@ -43,17 +47,22 @@ class Downloader:
         )
         
         # 统计信息
-        self.total_downloaded = 0
-        self.total_bytes = 0
-        self.start_time: Optional[float] = None
-        self.speed_history: list = []
+        self.total_downloaded: int = 0
+        self.total_bytes: int = 0
+        self.start_time: float | None = None
+        self.speed_history: list[float] = []
+    
+    @classmethod
+    def create(cls) -> Self:
+        """工厂方法：创建下载器实例（Python 3.11+ Self 类型）"""
+        return cls()
     
     def download(
         self,
         url: str,
         save_path: Path,
         resume: bool = True
-    ) -> Tuple[bool, dict]:
+    ) -> tuple[bool, dict[str, str | int | float | None]]:
         """
         下载文件（支持断点续传、速度统计）
         
@@ -65,7 +74,7 @@ class Downloader:
         Returns:
             (是否成功，统计信息字典)
         """
-        stats = {
+        stats: dict[str, str | int | float | None] = {
             'url': url,
             'file': save_path.name,
             'start_size': 0,
@@ -176,8 +185,8 @@ class Downloader:
         self,
         url: str,
         save_path: Path,
-        max_retries: Optional[int] = None
-    ) -> Tuple[bool, dict]:
+        max_retries: int | None = None
+    ) -> tuple[bool, dict[str, Any]]:
         """
         带重试的下载（指数退避 + jitter）
         

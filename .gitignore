@@ -1,4 +1,4 @@
-# Python
+# Python 3.11+
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,10 +20,17 @@ wheels/
 .installed.cfg
 *.egg
 
+# Python 3.11 特定缓存
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
 # 虚拟环境
 venv/
 ENV/
 env/
+.venv/
 
 # 敏感文件（严禁提交）
 .env
