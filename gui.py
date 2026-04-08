@@ -264,6 +264,8 @@ def init_session_state() -> None:
         st.session_state.current_keyword = ''
     if 'stop_flag' not in st.session_state:
         st.session_state.stop_flag = False
+    if 'auto_refresh' not in st.session_state:
+        st.session_state.auto_refresh = False
 
 
 def add_log(message: str, level: str = "INFO") -> None:
@@ -479,11 +481,11 @@ def render_progress() -> None:
 
 
 def render_log_panel() -> None:
-    """渲染日志面板"""
+    """渲染日志面板（支持实时显示）"""
     st.markdown("### 📋 运行日志")
     
     # 日志过滤选项
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
         log_filter = st.selectbox(
             "日志级别过滤",
@@ -495,7 +497,14 @@ def render_log_panel() -> None:
     with col2:
         auto_scroll = st.checkbox("自动滚动", value=True)
     
-    with col2:
+    with col3:
+        # 将 auto_refresh 存储到 session_state
+        if 'auto_refresh' not in st.session_state:
+            st.session_state.auto_refresh = True
+        st.checkbox("自动刷新", value=st.session_state.auto_refresh, key="auto_refresh_checkbox", help="启用后日志会自动更新")
+        st.session_state.auto_refresh = st.session_state.auto_refresh_checkbox
+    
+    with col4:
         if st.button("📥 导出日志"):
             if st.session_state.logs:
                 log_text = "\n".join(st.session_state.logs)
@@ -506,21 +515,24 @@ def render_log_panel() -> None:
                     mime="text/plain"
                 )
     
-    # 日志显示区域
-    log_container = st.container()
+    # 日志显示区域（使用 st.empty() 实现实时更新）
+    log_container = st.empty()
     
-    with log_container:
+    with log_container.container():
         if st.session_state.logs:
             # 过滤日志
             filtered_logs = st.session_state.logs
             if log_filter != "全部":
                 filtered_logs = [log for log in st.session_state.logs if f"[{log_filter}]" in log]
             
-            # 显示日志
-            log_text = "\n".join(filtered_logs[-50:])  # 显示最近50条
+            # 显示日志（最近100条）
+            log_text = "\n".join(filtered_logs[-100:])
             st.code(log_text, language="log")
+            
+            # 显示日志统计
+            st.caption(f"共 {len(st.session_state.logs)} 条日志，显示最近 {len(filtered_logs[-100:])} 条")
         else:
-            st.info("暂无日志记录")
+            st.info("暂无日志记录，开始下载任务后将实时显示日志")
 
 
 def render_download_history() -> None:
@@ -780,10 +792,28 @@ def main() -> None:
             thread_safe_state.set('stop_flag', True)
             st.toast("正在停止下载...", icon="⚠️")
     
-    # 自动刷新（运行时）
+    # 自动刷新机制
+    # 1. 任务运行时：快速刷新（0.5秒）
+    # 2. 任务刚完成：延迟刷新以显示最终日志
+    # 3. 自动刷新开启时：定期刷新（2秒）
+    
+    # 初始化上次日志数量
+    if 'last_log_count' not in st.session_state:
+        st.session_state.last_log_count = 0
+    
+    current_log_count = len(st.session_state.logs)
+    
     if st.session_state.is_running:
+        # 任务运行时快速刷新
         time.sleep(0.5)
+        st.session_state.last_log_count = current_log_count
         st.rerun()
+    elif st.session_state.auto_refresh and current_log_count > 0:
+        # 任务完成后，如果日志有变化则刷新
+        if current_log_count != st.session_state.last_log_count:
+            st.session_state.last_log_count = current_log_count
+            time.sleep(1.0)  # 稍慢的刷新频率
+            st.rerun()
     
     # 日志面板
     st.markdown("---")
