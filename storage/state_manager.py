@@ -14,6 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Self
 
+from config.constants import STATE_FLUSH_INTERVAL, STATE_BATCH_SIZE
+from storage.logger import get_logger
+
+logger = get_logger("state_manager")
+
 
 @dataclass
 class DownloadTask:
@@ -36,37 +41,64 @@ class DownloadTask:
 
 class StateManager:
     """状态管理器类（Python 3.11+ 优化版）"""
-    
+
     def __init__(self, state_path: Path) -> None:
+        """
+        初始化状态管理器
+
+        Args:
+            state_path: 状态文件存储路径
+        """
         self.state_path: Path = state_path
         self.state_file: Path = state_path / "download_state.json"
         self.lock: threading.Lock = threading.Lock()
-        
+
+        # 批量写入支持
+        self._dirty: bool = False
+        self._pending_updates: list[tuple[str, dict]] = []
+        self._last_flush_time: float = 0.0
+
         # 确保目录存在
         self.state_path.mkdir(parents=True, exist_ok=True)
-        
+
         # 加载状态
         self.tasks: dict[str, DownloadTask] = {}
         self._load_state()
-    
+
     @classmethod
     def create(cls, state_path: Path) -> Self:
         """工厂方法：创建状态管理器实例（Python 3.11+ Self 类型）"""
         return cls(state_path)
-    
-    def _load_state(self):
+
+    def _load_state(self) -> None:
         """从文件加载状态"""
-        if self.state_file.exists():
+        if not self.state_file.exists():
+            self.tasks = {}
+            return
+
+        try:
+            with open(self.state_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.tasks = {
+                    k: DownloadTask(**v) for k, v in data.get('tasks', {}).items()
+                }
+        except json.JSONDecodeError as e:
+            logger.error(f"状态文件JSON解析失败：{e}")
+            # 备份损坏的文件
+            backup_path = self.state_file.with_suffix('.json.bak')
             try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.tasks = {
-                        k: DownloadTask(**v) for k, v in data.get('tasks', {}).items()
-                    }
-            except Exception as e:
-                print(f"⚠️ 加载状态失败：{e}")
-                self.tasks = {}
-    
+                self.state_file.rename(backup_path)
+                logger.info(f"已备份损坏的状态文件到：{backup_path}")
+            except OSError:
+                pass
+            self.tasks = {}
+        except OSError as e:
+            logger.error(f"无法读取状态文件：{e}")
+            self.tasks = {}
+        except KeyError as e:
+            logger.error(f"状态文件格式错误：{e}")
+            self.tasks = {}
+
     def _save_state(self) -> None:
         """保存状态到文件"""
         with self.lock:
@@ -74,35 +106,51 @@ class StateManager:
                 'tasks': {k: asdict(v) for k, v in self.tasks.items()},
                 'updated_at': datetime.now().isoformat()
             }
-            with open(self.state_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-    
+            try:
+                with open(self.state_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                self._dirty = False
+            except OSError as e:
+                logger.error(f"保存状态文件失败：{e}")
+
     def add_task(self, task: DownloadTask) -> None:
         """添加下载任务"""
-        self.tasks[task.url] = task
-        self._save_state()
-    
+        with self.lock:
+            self.tasks[task.url] = task
+            self._dirty = True
+        # 不立即保存，由flush()批量保存
+
     def update_task(self, url: str, **kwargs: str | int) -> None:
         """更新任务状态"""
-        if url in self.tasks:
-            task = self.tasks[url]
-            for key, value in kwargs.items():
-                if hasattr(task, key):
-                    setattr(task, key, value)
-            task.updated_at = datetime.now().isoformat()
+        with self.lock:
+            if url in self.tasks:
+                task = self.tasks[url]
+                for key, value in kwargs.items():
+                    if hasattr(task, key):
+                        setattr(task, key, value)
+                task.updated_at = datetime.now().isoformat()
+                self._dirty = True
+                self._pending_updates.append((url, kwargs))
+        # 不立即保存，由flush()批量保存
+
+    def flush(self) -> None:
+        """刷新状态到存储（批量写入）"""
+        if self._dirty:
             self._save_state()
-    
+            self._pending_updates.clear()
+            logger.debug("状态已刷新到存储")
+
     def get_task(self, url: str) -> DownloadTask | None:
         """获取任务"""
         return self.tasks.get(url)
-    
+
     def get_incomplete_tasks(self) -> list[DownloadTask]:
         """获取未完成的任务（用于断点续传）"""
         return [
             task for task in self.tasks.values()
             if task.status in ['pending', 'downloading']
         ]
-    
+
     def get_statistics(self) -> dict[str, int | str]:
         """获取统计信息"""
         total = len(self.tasks)
@@ -110,7 +158,7 @@ class StateManager:
         failed = sum(1 for t in self.tasks.values() if t.status == 'failed')
         pending = sum(1 for t in self.tasks.values() if t.status == 'pending')
         downloading = sum(1 for t in self.tasks.values() if t.status == 'downloading')
-        
+
         return {
             'total': total,
             'completed': completed,
@@ -119,11 +167,13 @@ class StateManager:
             'downloading': downloading,
             'progress': f"{completed}/{total}" if total > 0 else "0/0"
         }
-    
+
     def clear_completed(self) -> None:
         """清理已完成的任务"""
-        self.tasks = {
-            k: v for k, v in self.tasks.items()
-            if v.status != 'completed'
-        }
-        self._save_state()
+        with self.lock:
+            self.tasks = {
+                k: v for k, v in self.tasks.items()
+                if v.status != 'completed'
+            }
+            self._dirty = True
+        self.flush()
