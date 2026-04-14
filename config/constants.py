@@ -108,3 +108,26 @@ BAIDU_IMAGE_REFERER: str = "https://image.baidu.com/"
 FALLBACK_IMAGE_SERVICE: str = "https://picsum.photos"
 FALLBACK_IMAGE_WIDTH: int = 800
 FALLBACK_IMAGE_HEIGHT: int = 600
+
+# ============================================================================
+# 多源爬虫配置
+# ============================================================================
+DEFAULT_SOURCE_ORDER: list[str] = ["baidu", "bing", "sogou", "so360"]
+SOURCE_DISPLAY_NAMES: dict[str, str] = {
+    "baidu": "百度图片",
+    "bing": "必应图片",
+    "sogou": "搜狗图片",
+    "so360": "360图片",
+}
+
+# 必应图片
+BING_IMAGE_SEARCH_URL: str = "https://www.bing.com/images/search"
+BING_IMAGE_ASYNC_URL: str = "https://www.bing.com/images/async"
+
+# 搜狗图片
+SOGOU_IMAGE_API_URL: str = "https://pic.sogou.com/napi/pc/searchList"
+SOGOU_IMAGE_SEARCH_URL: str = "https://pic.sogou.com/pics"
+
+# 360图片
+SO360_IMAGE_API_URL: str = "https://image.so.com/j"
+SO360_IMAGE_SEARCH_URL: str = "https://image.so.com/i"

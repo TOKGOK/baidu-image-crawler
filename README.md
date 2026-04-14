@@ -1,15 +1,15 @@
-# 百度图库图片爬虫
+# 图片爬虫
 
-🤖 一个可靠、高效的百度图片下载工具（基于 Python 网络爬虫技术）
+🤖 一个可靠、高效的多源图片下载工具（支持百度、必应、搜狗、360）
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Python 3.11+ · MIT License
 
 ---
 
 ## ✨ 功能特性
 
-- ✅ **网页爬虫技术** - 使用 requests + BeautifulSoup 实现，无需依赖百度 API
+- ✅ **多源搜索** - 支持百度、必应、搜狗、360 四个图片源，自动去重
+- ✅ **顺序/并行模式** - 支持按源顺序累计搜索或并发并行搜索
 - ✅ **智能解析** - 多策略提取图片 URL，支持 HTML 标签和 JavaScript 数据解析
 - ✅ **断点续传** - 中断后可恢复下载
 - ✅ **多线程并发** - 自定义线程数，优化下载效率
@@ -43,6 +43,7 @@ streamlit run gui.py
 #### 3. 使用界面
 
 - 在浏览器中打开 `http://localhost:8501`
+- 在侧边栏选择启用的图片源（百度/必应/搜狗/360）
 - 输入搜索关键词和下载数量
 - 点击"开始下载"按钮
 - 实时查看下载进度和日志
@@ -65,11 +66,17 @@ cp .env.example .env
 #### 3. 运行爬虫
 
 ```bash
-# 下载 50 张风景图片
+# 使用所有源下载 50 张风景图片
 python main.py "风景" 50
 
-# 下载 100 张猫咪图片
-python main.py "猫咪" 100
+# 仅使用百度下载 100 张猫咪图片
+python main.py "猫咪" 100 --sources baidu
+
+# 使用百度+必应下载 200 张汽车图片
+python main.py "汽车" 200 --sources baidu,bing
+
+# 并行搜索所有源
+python main.py "花卉" --sources all --parallel
 ```
 
 ---
@@ -90,13 +97,16 @@ python main.py "猫咪" 100
 | `MAX_PAGES` | 最大爬取页数 | `10` |
 | `LOG_LEVEL` | 日志级别 | `INFO` |
 | `BAIDU_COOKIE` | 百度 Cookie (可选) | - |
+| `BING_COOKIE` | 必应 Cookie (可选) | - |
+| `SOGOU_COOKIE` | 搜狗 Cookie (可选) | - |
+| `SO360_COOKIE` | 360 Cookie (可选) | - |
 
 ---
 
 ## 📁 项目结构
 
 ```
-baidu-image-crawler/
+image-crawler/
 ├── main.py                    # 命令行主程序入口
 ├── gui.py                     # 图形界面主程序 (Streamlit)
 ├── README.md                  # 项目说明
@@ -104,11 +114,18 @@ baidu-image-crawler/
 ├── .env.example               # 环境变量示例
 ├── .gitignore                 # Git 忽略规则
 ├── config/
-│   └── settings.py            # 配置管理
+│   ├── constants.py           # 常量定义（多源源配置）
+│   └── settings.py            # 配置管理（多源Cookie）
 ├── core/
-│   ├── crawler.py             # 爬虫核心逻辑
+│   ├── unified_crawler.py     # 统一爬虫调度器（顺序/并行）
 │   ├── downloader.py          # 下载器（断点续传）
-│   └── thread_pool.py         # 自定义线程池
+│   ├── thread_pool.py         # 自定义线程池
+│   └── sources/               # 图片源策略实现
+│       ├── base.py            # 图片源抽象基类
+│       ├── baidu.py           # 百度图片源
+│       ├── bing.py            # 必应图片源
+│       ├── sogou.py           # 搜狗图片源
+│       └── so360.py           # 360图片源
 ├── storage/
 │   ├── logger.py              # 持久化日志
 │   └── state_manager.py       # 状态管理器
@@ -126,6 +143,7 @@ baidu-image-crawler/
 ### 功能特点
 
 - **现代化设计** - 基于 Streamlit 的响应式界面
+- **多源选择** - 侧边栏可勾选启用的图片源
 - **实时进度** - 动态显示下载进度和统计信息
 - **配置灵活** - 侧边栏可调整所有参数
 - **日志查看** - 实时日志面板，支持过滤和导出
@@ -143,7 +161,7 @@ baidu-image-crawler/
 | 日志面板 | 运行日志，支持级别过滤 |
 | 下载历史 | 历史任务记录 |
 | 图片预览 | 已下载图片网格展示 |
-| 侧边栏 | 配置设置、系统信息、快捷操作 |
+| 侧边栏 | 图片源选择、配置设置、系统信息 |
 
 ### 运行方式
 
@@ -199,11 +217,24 @@ python -m bandit -r .
 ### 基础用法
 
 ```bash
-# 下载默认数量（50 张）
+# 使用所有源搜索（默认行为）
 python main.py "风景"
 
-# 下载指定数量
+# 指定数量
 python main.py "猫咪" 100
+```
+
+### 指定图片源
+
+```bash
+# 仅使用百度
+python main.py "风景" 50 --sources baidu
+
+# 使用百度+必应
+python main.py "汽车" 100 --sources baidu,bing
+
+# 并行搜索所有源
+python main.py "花卉" --parallel
 ```
 
 ### 断点续传
@@ -232,33 +263,6 @@ grep "ERROR" logs/crawler.log
 ```bash
 # 查看 .state/download_state.json
 cat .state/download_state.json | jq '.tasks | length'
-```
-
----
-
-## 🛠️ 开发
-
-### 运行测试
-
-```bash
-pytest tests/
-```
-
-### 代码格式化
-
-```bash
-black .
-flake8 .
-```
-
-### 提交前检查
-
-```bash
-# 安全审计
-python utils/security.py .
-
-# 确保无敏感信息
-git diff --cached | grep -i "password\|secret\|token"
 ```
 
 ---

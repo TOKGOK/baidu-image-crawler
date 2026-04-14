@@ -63,8 +63,11 @@ class Settings:
         # 状态配置
         self.state_path: Path = Path(os.getenv("STATE_PATH", str(self.project_root / ".state")))
 
-        # 安全配置
+        # 安全配置（多源Cookie）
         self.baidu_cookie: str | None = os.getenv("BAIDU_COOKIE")
+        self.bing_cookie: str | None = os.getenv("BING_COOKIE")
+        self.sogou_cookie: str | None = os.getenv("SOGOU_COOKIE")
+        self.so360_cookie: str | None = os.getenv("SO360_COOKIE")
 
         # 创建必要的目录
         self._ensure_directories()

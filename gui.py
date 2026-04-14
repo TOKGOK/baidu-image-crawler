@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-百度图库图片爬虫 - 图形化界面 (GUI)
+多源图片爬虫 - 图形化界面 (GUI)
 
 使用 Streamlit 构建现代化图形界面
 运行方式: streamlit run gui.py
@@ -34,9 +34,11 @@ from config.constants import (
     GUI_PREVIEW_COLUMNS,
     GUI_HISTORY_DISPLAY_COUNT,
     IMAGE_EXTENSIONS,
+    SOURCE_DISPLAY_NAMES,
+    DEFAULT_SOURCE_ORDER,
 )
 from config.settings import settings
-from core.crawler import BaiduImageCrawler
+from core.unified_crawler import UnifiedImageCrawler
 from storage.state_manager import StateManager
 from storage.logger import get_logger
 from utils.validator import validate_keyword, validate_download_count, ValidationError
@@ -91,12 +93,12 @@ thread_safe_state = ThreadSafeState()
 
 # 页面配置
 st.set_page_config(
-    page_title="百度图片爬虫",
+    page_title="多源图片爬虫",
     page_icon="🖼️",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'About': "百度图片爬虫 v1.0.0 - 现代化图片下载工具"
+        'About': "多源图片爬虫 v2.0.0 - 现代化图片下载工具（支持百度、必应、搜狗、360）"
     }
 )
 
@@ -300,7 +302,24 @@ def render_sidebar() -> dict[str, Any]:
     with st.sidebar:
         st.markdown("### ⚙️ 配置设置")
         st.markdown("---")
-        
+
+        # 图片源选择
+        st.markdown("#### 🌐 图片源")
+        source_labels = {k: v for k, v in SOURCE_DISPLAY_NAMES.items()}
+        default_sources = list(source_labels.keys())
+        selected_sources = st.multiselect(
+            "选择启用的图片源",
+            options=default_sources,
+            format_func=lambda x: source_labels.get(x, x),
+            default=default_sources,
+            help="勾选要使用的图片搜索引擎，多个源可以互补"
+        )
+
+        if not selected_sources:
+            st.warning("⚠️ 请至少选择一个图片源！")
+
+        st.markdown("---")
+
         # 下载配置
         st.markdown("#### 📥 下载设置")
         
@@ -398,13 +417,14 @@ def render_sidebar() -> dict[str, Any]:
             'timeout': timeout,
             'chunk_size': chunk_size,
             'retry_delay': retry_delay,
-            'baidu_cookie': baidu_cookie if baidu_cookie else None
+            'baidu_cookie': baidu_cookie if baidu_cookie else None,
+            'sources': selected_sources,
         }
 
 
 def render_header() -> None:
     """渲染页面头部"""
-    st.markdown('<h1 class="main-header">🖼️ 百度图片爬虫</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🖼️ 多源图片爬虫</h1>', unsafe_allow_html=True)
     st.markdown('<p style="text-align: center; color: #666; font-size: 1.1rem;">现代化图片下载工具 - 支持批量下载、断点续传</p>', unsafe_allow_html=True)
     st.markdown("---")
 
@@ -631,28 +651,39 @@ def render_image_preview(config: dict[str, Any]) -> None:
 
 def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_placeholder) -> None:
     """在后台线程运行爬虫（使用线程安全状态）"""
-    crawler = None
     try:
-        add_log(f"开始爬取任务: 关键词='{keyword}', 数量={max_num}", "INFO")
+        sources = config.get('sources', DEFAULT_SOURCE_ORDER)
+        if not sources:
+            add_log("⚠️ 未选择任何图片源", "ERROR")
+            thread_safe_state.set('is_running', False)
+            return
+
+        add_log(f"开始爬取任务: 关键词='{keyword}', 数量={max_num}, 源={', '.join(sources)}", "INFO")
 
         # 使用局部配置变量，避免修改全局settings
         local_download_path = Path(config['download_path'])
         local_download_path.mkdir(parents=True, exist_ok=True)
 
         # 如果配置了Cookie，临时设置（仅用于本次任务）
-        original_cookie = settings.baidu_cookie
-        if config['baidu_cookie']:
+        original_baidu_cookie = settings.baidu_cookie
+        original_bing_cookie = settings.bing_cookie
+        original_sogou_cookie = settings.sogou_cookie
+        original_so360_cookie = settings.so360_cookie
+        if config.get('baidu_cookie'):
             settings.baidu_cookie = config['baidu_cookie']
 
-        # 创建爬虫实例
-        crawler = BaiduImageCrawler()
+        # 创建统一爬虫实例
+        crawler = UnifiedImageCrawler(sources=sources)
 
         # 搜索图片
         add_log(f"正在搜索图片: {keyword}", "INFO")
-        images = crawler.search_images(keyword, max_num)
+        images = crawler.search(keyword, max_num)
 
         # 恢复原始Cookie设置
-        settings.baidu_cookie = original_cookie
+        settings.baidu_cookie = original_baidu_cookie
+        settings.bing_cookie = original_bing_cookie
+        settings.sogou_cookie = original_sogou_cookie
+        settings.so360_cookie = original_so360_cookie
 
         if not images:
             add_log("未找到任何图片", "WARNING")
@@ -692,11 +723,14 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
                 save_path = save_dir / file_name
 
                 # 下载单张图片
-                success, download_stats = crawler.downloader.download_with_retry(
+                from core.downloader import Downloader
+                downloader = Downloader()
+                success, download_stats = downloader.download_with_retry(
                     img['url'],
                     save_path,
                     max_retries=config['max_retries']
                 )
+                downloader.close()
 
                 if success:
                     completed += 1
@@ -742,8 +776,6 @@ def run_crawler(keyword: str, max_num: int, config: dict[str, Any], progress_pla
     except Exception as e:
         add_log(f"爬取任务异常: {str(e)}", "ERROR")
     finally:
-        if crawler:
-            crawler.close()
         thread_safe_state.set('is_running', False)
         thread_safe_state.set('stop_flag', False)
 
@@ -788,6 +820,8 @@ def main() -> None:
     if search_button:
         if not keyword:
             st.error("❌ 请输入搜索关键词！")
+        elif not config['sources']:
+            st.error("❌ 请至少选择一个图片源！")
         elif st.session_state.is_running:
             st.warning("⚠️ 已有任务在运行中，请等待完成")
         else:
@@ -866,8 +900,8 @@ def main() -> None:
     st.markdown(
         """
         <div style="text-align: center; color: #666; padding: 1rem;">
-            <p>百度图片爬虫 v1.0.0 | 基于 Python 3.11+ 和 Streamlit 构建</p>
-            <p>💡 提示: 配置百度Cookie可提高搜索成功率，在侧边栏高级设置中配置</p>
+            <p>多源图片爬虫 v2.0.0 | 基于 Python 3.11+ 和 Streamlit 构建</p>
+            <p>支持百度、必应、搜狗、360 多个图片源 | 在侧边栏选择启用的源</p>
         </div>
         """,
         unsafe_allow_html=True
